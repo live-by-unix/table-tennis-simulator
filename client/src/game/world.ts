@@ -101,7 +101,7 @@ export function buildWorld(): World {
   const spot = new THREE.SpotLight(0xffffff, 60, 20, Math.PI / 5, 0.4);
   spot.position.set(0, 5.5, 0);
   spot.target.position.set(0, 0, 0);
-  spot.castShadow = true;
+  spot.castShadow = false; // key light already casts shadows; avoids a second shadow pass
   scene.add(spot, spot.target);
 
   // floor

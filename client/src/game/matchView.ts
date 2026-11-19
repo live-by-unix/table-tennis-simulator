@@ -1,12 +1,13 @@
 import * as THREE from "three";
 import { buildWorld } from "./world";
-import { TABLE, BALL_RADIUS, PADDLE_FACE_RADIUS, GameSnapshot, SnapPaddle } from "./constants";
+import { TABLE, BALL_RADIUS, PADDLE_FACE_RADIUS, GameSnapshot, SnapPaddle, SnapBall } from "./constants";
 import { net } from "../net";
 
 interface Vec3 { x: number; y: number; z: number }
 
-const INPUT_HZ = 30;
-const INTERP_DELAY = 0.12; // seconds behind latest snapshot
+const INPUT_HZ = 60;
+const INTERP_DELAY = 0.08; // seconds behind latest snapshot
+const LOCAL_MAX_SPEED = 16; // stay under server cap (18) with margin
 
 interface PaddleMesh {
   group: THREE.Group;
@@ -63,6 +64,7 @@ export class MatchView {
 
   // snapshot interpolation
   private history: { t: number; snap: GameSnapshot }[] = [];
+  private ballHistory: { t: number; ball: SnapBall }[] = [];
   private latest: GameSnapshot | null = null;
   private mySide: 0 | 1 | null = null;
   private remotePaddleHist: Record<number, { t: number; p: SnapPaddle }[]> = { 0: [], 1: [] };
@@ -74,7 +76,9 @@ export class MatchView {
 
   // HUD elements
   private hudScore!: HTMLElement;
-  private hudNames!: HTMLElement;
+  private hudScore1!: HTMLElement;
+  private hudName0!: HTMLElement;
+  private hudName1!: HTMLElement;
   private hudPhase!: HTMLElement;
   private hudSpec!: HTMLElement;
   private hudServe!: HTMLElement;
@@ -88,8 +92,8 @@ export class MatchView {
     this.matchId = matchId;
     this.spectate = spectate;
 
-    this.renderer = new THREE.WebGLRenderer({ antialias: true });
-    this.renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+    this.renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: "high-performance" });
+    this.renderer.setPixelRatio(Math.min(devicePixelRatio, 1.5));
     this.renderer.shadowMap.enabled = true;
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     container.appendChild(this.renderer.domElement);
@@ -144,14 +148,13 @@ export class MatchView {
       </div>`;
     this.container.appendChild(wrap);
     this.hudScore = wrap.querySelector("#mv-score0") as HTMLElement;
-    const s1 = wrap.querySelector("#mv-score1") as HTMLElement;
-    this.hudNames = wrap.querySelector("#mv-name0") as HTMLElement;
-    const n1 = wrap.querySelector("#mv-name1") as HTMLElement;
+    this.hudScore1 = wrap.querySelector("#mv-score1") as HTMLElement;
+    this.hudName0 = wrap.querySelector("#mv-name0") as HTMLElement;
+    this.hudName1 = wrap.querySelector("#mv-name1") as HTMLElement;
     this.hudPhase = wrap.querySelector("#mv-phase") as HTMLElement;
     this.hudSpec = wrap.querySelector("#mv-spec") as HTMLElement;
     this.hudServe = wrap.querySelector("#mv-serve") as HTMLElement;
-    this.hudConns = [wrap.querySelector("#mv-name0")!, wrap.querySelector("#mv-name1")!];
-    void s1; void n1;
+    this.hudConns = [this.hudName0, this.hudName1];
     (wrap.querySelector("#mv-sens") as HTMLInputElement).oninput = (e) => {
       this.sensitivity = Number((e.target as HTMLInputElement).value) / 100;
     };
@@ -176,9 +179,10 @@ export class MatchView {
     const rect = this.container.getBoundingClientRect();
     const nx = ((e.clientX - rect.left) / rect.width) * 2 - 1;
     const ny = ((e.clientY - rect.top) / rect.height) * 2 - 1;
-    const dir = this.invertY ? 1 : -1;
-    this.targetZ = nx * 1.15 * this.sensitivity;
-    this.targetY = THREE.MathUtils.clamp(1.15 - ny * dir * 0.85 * this.sensitivity, 0.25, 2.3);
+    const dir = this.invertY ? -1 : 1;
+    const zSign = this.mySide === 0 ? 1 : -1;
+    this.targetZ = nx * 1.15 * this.sensitivity * zSign;
+    this.targetY = THREE.MathUtils.clamp(1.15 + ny * dir * 0.85 * this.sensitivity, 0.25, 2.3);
   };
 
   private onKey = (e: KeyboardEvent, down: boolean): void => {
@@ -219,8 +223,13 @@ export class MatchView {
     const snap = msg as unknown as GameSnapshot;
     if (snap.matchId !== this.matchId && !snap.spectator) return;
     this.latest = snap;
-    this.history.push({ t: performance.now() / 1000, snap });
+    const nowS = performance.now() / 1000;
+    this.history.push({ t: nowS, snap });
     if (this.history.length > 120) this.history.shift();
+    if (snap.ball) {
+      this.ballHistory.push({ t: nowS, ball: snap.ball });
+      if (this.ballHistory.length > 60) this.ballHistory.shift();
+    }
     if (snap.yourSide !== null || snap.yourSide === null) {
       this.mySide = snap.yourSide;
     }
@@ -241,21 +250,15 @@ export class MatchView {
   }
 
   private updateHud(s: GameSnapshot): void {
-    const names = this.hudConns;
     for (let i = 0; i < 2; i++) {
       const p = s.paddles[i];
-      if (p) {
-        const el = document.getElementById(`mv-name${i}`);
-        if (el) {
-          el.innerHTML = `${p.username}<br><span class="conn ${p.connected ? "ok" : "bad"}">${p.connected ? "●" : "○"}</span>`;
-        }
-      }
+      const el = i === 0 ? this.hudName0 : this.hudName1;
+      const txt = p ? `${p.username}<br><span class="conn ${p.connected ? "ok" : "bad"}">${p.connected ? "●" : "○"}</span>` : "-";
+      if (el.dataset.v !== txt) { el.dataset.v = txt; el.innerHTML = txt; }
     }
-    void names;
-    const sc = document.getElementById("mv-score0") as HTMLElement;
-    const sc1 = document.getElementById("mv-score1") as HTMLElement;
-    if (sc) sc.textContent = String(s.score[0]);
-    if (sc1) sc1.textContent = String(s.score[1]);
+    const sc0 = String(s.score[0]), sc1 = String(s.score[1]);
+    if (this.hudScore.textContent !== sc0) this.hudScore.textContent = sc0;
+    if (this.hudScore1.textContent !== sc1) this.hudScore1.textContent = sc1;
     const phaseTxt: Record<string, string> = {
       countdown: "Get ready…",
       serve_ready: s.serverSide === s.yourSide ? "Your serve" : `${s.paddles[s.serverSide]?.username ?? "?"}'s serve`,
@@ -296,7 +299,7 @@ export class MatchView {
 
     this.updateLocalPaddle(dt);
     this.sendInput(now);
-    this.render(now);
+    this.render(now, dt);
     this.renderer.render(this.scene, this.camera);
   };
 
@@ -314,11 +317,11 @@ export class MatchView {
     const target = new THREE.Vector3(x, this.targetY, this.targetZ);
 
     // smooth follow
-    const k = 1 - Math.exp(-dt * 18);
+    const k = 1 - Math.exp(-dt * 26);
     this.lastLocalPos.copy(this.localPos);
     this.localPos.lerp(target, k);
     this.localVel.copy(this.localPos).sub(this.lastLocalPos).divideScalar(Math.max(dt, 1e-4));
-    if (this.localVel.length() > 20) this.localVel.setLength(20);
+    if (this.localVel.length() > LOCAL_MAX_SPEED) this.localVel.setLength(LOCAL_MAX_SPEED);
 
     // orientation: face table + slight tilt from velocity
     const yaw = this.mySide === 0 ? Math.PI / 2 : -Math.PI / 2;
@@ -354,28 +357,26 @@ export class MatchView {
     });
   }
 
-  private render(now: number): void {
+  private render(now: number, dt: number): void {
     const s = this.latest;
     if (!s) return;
 
     // ball interpolation
     if (s.ball) {
       const renderT = now - INTERP_DELAY;
-      const hist = this.history.filter((h) => h.snap.ball);
+      const hist = this.ballHistory;
       let bpos = s.ball.pos;
-      if (hist.length >= 2) {
-        for (let i = hist.length - 1; i > 0; i--) {
-          const a = hist[i - 1]!;
-          const b = hist[i]!;
-          if (a.t <= renderT && b.t >= renderT) {
-            const f = (renderT - a.t) / Math.max(1e-4, b.t - a.t);
-            bpos = {
-              x: a.snap.ball!.pos.x + (b.snap.ball!.pos.x - a.snap.ball!.pos.x) * f,
-              y: a.snap.ball!.pos.y + (b.snap.ball!.pos.y - a.snap.ball!.pos.y) * f,
-              z: a.snap.ball!.pos.z + (b.snap.ball!.pos.z - a.snap.ball!.pos.z) * f,
-            };
-            break;
-          }
+      for (let i = hist.length - 1; i > 0; i--) {
+        const a = hist[i - 1]!;
+        const b = hist[i]!;
+        if (a.t <= renderT && b.t >= renderT) {
+          const f = (renderT - a.t) / Math.max(1e-4, b.t - a.t);
+          bpos = {
+            x: a.ball.pos.x + (b.ball.pos.x - a.ball.pos.x) * f,
+            y: a.ball.pos.y + (b.ball.pos.y - a.ball.pos.y) * f,
+            z: a.ball.pos.z + (b.ball.pos.z - a.ball.pos.z) * f,
+          };
+          break;
         }
       }
       this.ball.position.set(bpos.x, bpos.y, bpos.z);
@@ -427,14 +428,13 @@ export class MatchView {
     }
 
     // camera
-    this.updateCamera(s, now);
+    this.updateCamera(s, dt);
   }
 
   private camPos = new THREE.Vector3();
   private camTarget = new THREE.Vector3();
 
-  private updateCamera(s: GameSnapshot, now: number): void {
-    void now;
+  private updateCamera(s: GameSnapshot, dt: number): void {
     if (this.mySide !== null && !this.spectate) {
       const sideSign = this.mySide === 0 ? -1 : 1;
       // behind the player, slightly above table, looking across
@@ -445,9 +445,10 @@ export class MatchView {
         0.95,
         THREE.MathUtils.clamp(ball.z * 0.25, -0.4, 0.4),
       );
-      const k = 0.08;
+      const k = 1 - Math.exp(-dt * 6);
+      const kLook = 1 - Math.exp(-dt * 9);
       this.camPos.lerp(desired, k);
-      this.camTarget.lerp(look, 0.12);
+      this.camTarget.lerp(look, kLook);
       if (this.camPos.lengthSq() === 0) this.camPos.copy(desired);
       this.camera.position.copy(this.camPos);
       this.camera.lookAt(this.camTarget);

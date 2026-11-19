@@ -12,10 +12,13 @@ import {
   stepBall,
   tableSide,
   validatePaddleState,
+  PADDLE_MAX_SPEED,
+  PADDLE_PLAY_BOUNDS,
   v3,
   len,
   norm,
   scale,
+  clamp,
   add,
   sub,
   dot,
@@ -46,6 +49,7 @@ export interface MatchPlayer {
   paddle: PaddleState;
   lastInputSeq: number;
   lastInputAt: number;
+  lastExtrapAt: number;
 }
 
 export interface MatchOptions {
@@ -149,6 +153,7 @@ export class Match {
       paddle: defaultPaddle(side),
       lastInputSeq: 0,
       lastInputAt: 0,
+      lastExtrapAt: 0,
     };
   }
 
@@ -179,6 +184,16 @@ export class Match {
     if (!p) return "not_player";
     if (!p.connected) return "not_player";
     if (seq <= p.lastInputSeq) return "ok"; // stale, ignore silently
+    // Clamp excessive velocities instead of rejecting the whole input —
+    // a fast mouse flick shouldn't freeze the paddle server-side.
+    const spd = len(paddle.vel);
+    if (spd > PADDLE_MAX_SPEED) {
+      paddle = { ...paddle, vel: scale(norm(paddle.vel), PADDLE_MAX_SPEED) };
+    }
+    const av = len(paddle.angVel);
+    if (av > 60) {
+      paddle = { ...paddle, angVel: scale(norm(paddle.angVel), 60) };
+    }
     if (!validatePaddleState(paddle)) return "invalid";
 
     const now = Date.now();
@@ -194,6 +209,7 @@ export class Match {
     p.paddle = paddle;
     p.lastInputSeq = seq;
     p.lastInputAt = now;
+    p.lastExtrapAt = now;
     return "ok";
   }
 
@@ -237,6 +253,23 @@ export class Match {
     // disconnect grace / forfeit
     this.checkDisconnects();
     if (this.finished) return;
+
+    // Extrapolate paddles between client updates so collisions use fresh
+    // positions even when input packets arrive a tick late.
+    const nowMs = Date.now();
+    const pb = PADDLE_PLAY_BOUNDS;
+    for (const p of this.players) {
+      if (!p.connected || p.lastInputAt === 0) continue;
+      const since = p.lastExtrapAt === 0 ? p.lastInputAt : p.lastExtrapAt;
+      const dIn = Math.min(0.05, (nowMs - since) / 1000);
+      p.lastExtrapAt = nowMs;
+      if (dIn <= 0.001) continue;
+      const v = p.paddle.vel;
+      if (v.x === 0 && v.y === 0 && v.z === 0) continue;
+      p.paddle.pos.x = clamp(p.paddle.pos.x + v.x * dIn, pb.xMin, pb.xMax);
+      p.paddle.pos.y = clamp(p.paddle.pos.y + v.y * dIn, pb.yMin, pb.yMax);
+      p.paddle.pos.z = clamp(p.paddle.pos.z + v.z * dIn, pb.zMin, pb.zMax);
+    }
 
     switch (this.phase) {
       case "countdown":
