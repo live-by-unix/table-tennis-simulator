@@ -293,6 +293,8 @@ export class MatchManager {
     const room = this.rooms.get(roomId);
     if (!room || room.status !== "waiting")
       return { ok: false, error: "Room is not joinable" };
+    if (user.userId === room.hostId)
+      return { ok: false, error: "You can't join your own room — use a second account" };
     if (room.players.has(user.userId)) return { ok: true, room };
     if (room.players.size >= 2) return { ok: false, error: "Room is full" };
     room.players.set(user.userId, {

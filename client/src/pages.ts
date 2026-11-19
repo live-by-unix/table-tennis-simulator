@@ -334,7 +334,12 @@ async function renderPlay(app: HTMLElement): Promise<void> {
     const code = (app.querySelector("#room-code") as HTMLInputElement).value.trim();
     if (!code) return;
     try {
-      await api.joinRoom(code);
+      const jr = await api.joinRoom(code);
+      roomRole = "guest";
+      roomId = jr.roomId;
+      (app.querySelector("#room-info") as HTMLElement).innerHTML =
+        `<p>Joined room <b>${escapeHtml(jr.code)}</b></p>
+         <p class="muted">Waiting for host to start the match…</p>`;
       toast("Joined room!");
     } catch (e) { toast((e as Error).message, true); }
   };
