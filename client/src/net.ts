@@ -22,6 +22,8 @@ export class NetClient {
       // flush queued messages
       const q = this.pending.splice(0);
       for (const m of q) ws.send(m);
+      // (re)authenticate this socket — picks up session set after page load
+      ws.send(JSON.stringify({ type: "hello" }));
       this.emit({ type: "_connected" });
     };
     ws.onmessage = (ev) => {

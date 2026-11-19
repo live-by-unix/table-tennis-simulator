@@ -140,6 +140,8 @@ async function renderAuth(app: HTMLElement, mode: "login" | "register"): Promise
     try {
       const res = isReg ? await api.register(username, password) : await api.login(username, password);
       setUser(res.user);
+      // reconnect so the WS handshake carries the new session cookie
+      net.disconnect();
       net.connect();
       navigate({ name: "dashboard" });
     } catch (e) {
