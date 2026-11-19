@@ -273,28 +273,28 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
   // ---------- private rooms ----------
   app.post("/api/v1/rooms", async (req) => {
     const user = await requireAuth(req);
-    const ws = matchManager.userConns.get(user.id);
-    if (!ws) throw err(400, "WebSocket connection required");
+    if (!matchManager.userConns.get(user.id)) {
+      throw err(400, "WebSocket connection required");
+    }
     const room = await matchManager.createRoom({
       userId: user.id,
       username: user.username,
       rating: user.rating,
-      ws,
     });
     return { roomId: room.id, code: room.code };
   });
 
   app.post("/api/v1/rooms/join", async (req) => {
     const user = await requireAuth(req);
-    const ws = matchManager.userConns.get(user.id);
-    if (!ws) throw err(400, "WebSocket connection required");
+    if (!matchManager.userConns.get(user.id)) {
+      throw err(400, "WebSocket connection required");
+    }
     const body = z.object({ code: z.string().min(4).max(12) }).parse(req.body);
     const res = await matchManager.joinRoomByCode(
       {
         userId: user.id,
         username: user.username,
         rating: user.rating,
-        ws,
       },
       body.code,
     );

@@ -24,7 +24,6 @@ interface RoomPlayer {
   userId: string;
   username: string;
   rating: number;
-  ws: ClientConn;
 }
 
 interface PrivateRoom {
@@ -34,6 +33,7 @@ interface PrivateRoom {
   status: "waiting" | "in_match" | "closed";
   matchId: string | null;
   players: Map<string, RoomPlayer>;
+  createdAtMs: number;
 }
 
 const TICK_MS = 1000 / config.gameTickHz;
@@ -71,6 +71,15 @@ export class MatchManager {
       m.tick(TICK_MS);
       this.broadcast(m);
       if (m.finished && !m.endedAt) m.endedAt = now;
+    }
+    // expire stale waiting rooms (15 min)
+    for (const room of [...this.rooms.values()]) {
+      if (room.status === "waiting" && Date.now() - room.createdAtMs > 15 * 60 * 1000) {
+        room.status = "closed";
+        this.rooms.delete(room.id);
+        this.roomByCode.delete(room.code);
+        void query(`UPDATE private_rooms SET status='closed' WHERE id=$1`, [room.id]).catch(() => {});
+      }
     }
     // cleanup finished matches after short delay
     for (const [id, m] of this.matches) {
@@ -227,23 +236,23 @@ export class MatchManager {
     );
     for (const e of [a, b]) {
       const opp = e === a ? b : a;
-      try {
-        e.ws.send(
-          JSON.stringify({
-            type: "matchmaking:found",
-            matchId: match.id,
-            opponent: { username: opp.username, rating: opp.rating },
-          }),
-        );
-      } catch {
-        /* dead */
-      }
+      this.sendToUser(e.userId, {
+        type: "matchmaking:found",
+        matchId: match.id,
+        opponent: { username: opp.username, rating: opp.rating },
+      });
     }
+  }
+
+  private sendToUser(userId: string, msg: unknown): void {
+    const conn = this.userConns.get(userId);
+    if (!conn) return;
+    try { conn.send(JSON.stringify(msg)); } catch { /* dead */ }
   }
 
   // ---------- private rooms ----------
 
-  async createRoom(host: { userId: string; username: string; rating: number; ws: ClientConn }): Promise<PrivateRoom> {
+  async createRoom(host: { userId: string; username: string; rating: number }): Promise<PrivateRoom> {
     const id = uuid();
     let code = roomCode();
     // ensure uniqueness
@@ -259,12 +268,12 @@ export class MatchManager {
       status: "waiting",
       matchId: null,
       players: new Map(),
+      createdAtMs: Date.now(),
     };
     room.players.set(host.userId, {
       userId: host.userId,
       username: host.username,
       rating: host.rating,
-      ws: host.ws,
     });
     this.rooms.set(id, room);
     this.roomByCode.set(code, id);
@@ -276,7 +285,7 @@ export class MatchManager {
   }
 
   async joinRoomByCode(
-    user: { userId: string; username: string; rating: number; ws: ClientConn },
+    user: { userId: string; username: string; rating: number },
     code: string,
   ): Promise<{ ok: boolean; error?: string; room?: PrivateRoom }> {
     const roomId = this.roomByCode.get(code.toUpperCase());
@@ -290,27 +299,19 @@ export class MatchManager {
       userId: user.userId,
       username: user.username,
       rating: user.rating,
-      ws: user.ws,
     });
     await query(
       `INSERT INTO invitations (id, room_id, inviter_id, invitee_id, token)
        VALUES ($1,$2,$3,$4,$5)`,
       [uuid(), room.id, room.hostId, user.userId, hashToken(randomToken(8))],
     ).catch(() => {});
-    // notify host
-    const host = room.players.get(room.hostId);
-    try {
-      host?.ws.send(
-        JSON.stringify({
-          type: "room:player_joined",
-          roomId: room.id,
-          code: room.code,
-          player: { username: user.username, rating: user.rating },
-        }),
-      );
-    } catch {
-      /* dead */
-    }
+    // notify host (conn resolved lazily — survives reconnects)
+    this.sendToUser(room.hostId, {
+      type: "room:player_joined",
+      roomId: room.id,
+      code: room.code,
+      player: { username: user.username, rating: user.rating },
+    });
     return { ok: true, room };
   }
 
@@ -349,11 +350,7 @@ export class MatchManager {
       match.id,
     ]).catch(() => {});
     for (const p of room.players.values()) {
-      try {
-        p.ws.send(JSON.stringify({ type: "room:match_started", matchId: match.id }));
-      } catch {
-        /* dead */
-      }
+      this.sendToUser(p.userId, { type: "room:match_started", matchId: match.id });
     }
     return { ok: true, match };
   }
@@ -376,14 +373,10 @@ export class MatchManager {
     const q = this.queue.find((e) => e.userId === userId);
     if (q) {
       this.dequeue(userId);
-      try {
-        q.ws.send(JSON.stringify({ type: "matchmaking:cancelled" }));
-      } catch {
-        /* dead */
-      }
+      this.sendToUser(q.userId, { type: "matchmaking:cancelled" });
     }
-    // leave room
-    this.leaveRoom(userId);
+    // NOTE: room membership intentionally survives disconnects (reconnect grace,
+    // same as matches). Explicit leave via room:leave / REST /rooms/leave.
     // remove spectating conns
     const spec = this.spectatorIds.get(conn);
     if (spec) {

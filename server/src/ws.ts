@@ -171,7 +171,6 @@ export async function registerWs(app: FastifyInstance): Promise<void> {
               userId: user.id,
               username: user.username,
               rating: user.rating,
-              ws: conn,
             });
             send(ws, { type: "room:created", roomId: room.id, code: room.code });
             break;
@@ -179,7 +178,7 @@ export async function registerWs(app: FastifyInstance): Promise<void> {
           case "room:join": {
             if (!user) return;
             const res = await matchManager.joinRoomByCode(
-              { userId: user.id, username: user.username, rating: user.rating, ws: conn },
+              { userId: user.id, username: user.username, rating: user.rating },
               m.code,
             );
             if (!res.ok) send(ws, { type: "error", error: res.error ?? "Cannot join" });

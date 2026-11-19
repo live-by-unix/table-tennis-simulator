@@ -261,6 +261,8 @@ async function renderPlay(app: HTMLElement): Promise<void> {
   const joinBtn = app.querySelector("#mm-join") as HTMLButtonElement;
   const cancelBtn = app.querySelector("#mm-cancel") as HTMLButtonElement;
 
+  let roomRole: "host" | "guest" | null = null;
+  let roomId: string | null = null;
   const unsub = net.onMessage((msg) => {
     if (msg.type === "matchmaking:queued") {
       statusEl.innerHTML = '<div class="spinner" style="width:28px;height:28px"></div><p class="center muted">Searching for opponent…</p>';
@@ -284,21 +286,38 @@ async function renderPlay(app: HTMLElement): Promise<void> {
       }
     }
     if (msg.type === "room:created") {
+      roomRole = "host";
+      roomId = msg.roomId as string;
       (app.querySelector("#room-info") as HTMLElement).innerHTML =
         `<p>Room code: <b style="font-size:22px;letter-spacing:2px">${escapeHtml(msg.code as string)}</b></p>
          <p class="muted">Share this code. Waiting for opponent…</p>`;
-    } else if (msg.type === "room:player_joined") {
+    } else if (msg.type === "room:joined") {
+      roomRole = "guest";
+      roomId = msg.roomId as string;
       (app.querySelector("#room-info") as HTMLElement).innerHTML =
-        `<p>${escapeHtml((msg.player as { username: string }).username)} joined!</p>
-         <button id="room-start">Start Match</button>`;
-      (app.querySelector("#room-start") as HTMLButtonElement).onclick = async () => {
-        try {
-          const res = await api.startRoom(msg.roomId as string);
-          navigate({ name: "match", matchId: res.matchId });
-        } catch (e) { toast((e as Error).message, true); }
-      };
+        `<p>Joined room <b>${escapeHtml(msg.code as string)}</b></p>
+         <p class="muted">Waiting for host to start the match…</p>`;
+    } else if (msg.type === "room:player_joined") {
+      if (roomRole === "host") {
+        (app.querySelector("#room-info") as HTMLElement).innerHTML =
+          `<p>${escapeHtml((msg.player as { username: string }).username)} joined!</p>
+           <button id="room-start">Start Match</button>`;
+        (app.querySelector("#room-start") as HTMLButtonElement).onclick = async () => {
+          try {
+            const res = await api.startRoom(msg.roomId as string);
+            navigate({ name: "match", matchId: res.matchId });
+          } catch (e) { toast((e as Error).message, true); }
+        };
+      } else {
+        (app.querySelector("#room-info") as HTMLElement).innerHTML =
+          `<p>${escapeHtml((msg.player as { username: string }).username)} joined the room.</p>
+           <p class="muted">Waiting for host to start…</p>`;
+      }
     } else if (msg.type === "room:match_started") {
       navigate({ name: "match", matchId: msg.matchId as string });
+    } else if (msg.type === "room:left") {
+      roomRole = null; roomId = null;
+      (app.querySelector("#room-info") as HTMLElement).innerHTML = "";
     }
   });
   app.addEventListener("hashchange", () => unsub(), { once: true });
