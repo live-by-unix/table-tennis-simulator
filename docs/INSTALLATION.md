@@ -3,28 +3,39 @@
 ## Requirements
 
 - Node.js >= 20 and npm
-- PostgreSQL 16 (or Docker)
-- ~500 MB disk
+- That's it. PostgreSQL is bundled (embedded mode) — no Docker, no system packages.
 
-## Option A: Docker (recommended)
+## Option A: Zero-dependency (recommended)
 
 ```bash
-cp .env.example .env
-# set SESSION_SECRET (openssl rand -hex 32)
+npm install
+npm run build
 ./start.sh
 ```
 
-`docker-compose.yml` runs PostgreSQL 16 and the app. The database persists in the `pgdata` volume.
+The server automatically starts an embedded PostgreSQL on first run, stores data in
+`./data/pg`, and applies migrations. Subsequent starts reuse the same data.
 
-## Option B: Native
+To reset everything: `./stop.sh && rm -rf data/`
 
-1. `npm install`
-2. Create `.env` from `.env.example`; set `DATABASE_URL`, `SESSION_SECRET`, `ALLOWED_ORIGINS`.
-3. Ensure PostgreSQL is running and the database exists:
-   ```sql
-   CREATE DATABASE tabletennis;
-   ```
-4. `./dev.sh` for development, or `npm run build && ./start.sh` for production.
+## Option B: External PostgreSQL
+
+Set `DATABASE_URL` in `.env`:
+
+```
+DATABASE_URL=postgres://user:pass@host:5432/tabletennis
+```
+
+The server uses it when reachable; otherwise it falls back to embedded mode.
+
+## Option C: Docker
+
+```bash
+cp .env.example .env   # set SESSION_SECRET
+TTS_USE_DOCKER=1 ./start.sh
+```
+
+`docker-compose.yml` runs PostgreSQL 16 + the app.
 
 ## Environment variables
 
@@ -33,16 +44,19 @@ See `.env.example`. Key variables:
 | Var | Default | Purpose |
 |---|---|---|
 | `PORT` | 3000 | HTTP/WS port |
-| `DATABASE_URL` | postgres://… | Postgres connection |
-| `SESSION_SECRET` | — | **Required.** Cookie/session security |
+| `DATABASE_URL` | — | Optional external Postgres; unset → embedded |
+| `TTS_PGDATA` | `./data/pg` | Embedded PG data dir |
+| `TTS_PG_PORT` | 55432 | Embedded PG port |
+| `SESSION_SECRET` | — | Session/cookie secret (set for production) |
 | `APP_URL` / `CLIENT_URL` | localhost | Public URLs |
-| `ALLOWED_ORIGINS` | localhost:5173,3000 | CORS + WS origin allowlist (comma-sep) |
+| `ALLOWED_ORIGINS` | localhost:5173,3000 | CORS + WS origin allowlist |
 | `COOKIE_SECURE` | false | Set true behind HTTPS |
 | `GAME_TICK_HZ` | 60 | Physics tick rate |
 | `MATCH_DISCONNECT_GRACE_MS` | 30000 | Reconnect window |
 | `MATCH_POINT_SCORE` | 11 | Points to win |
-| `REDIS_URL` | — | Optional, reserved for multi-instance scaling |
 
-## Database
+## Database internals
 
-Migrations run automatically at server start (`server/migrations/*.sql`, tracked in `schema_migrations`). Apply manually with `cd server && npm run migrate`.
+- Embedded mode: `embedded-postgres` npm package (PostgreSQL 18 binaries), data in `TTS_PGDATA`.
+- Migrations: `server/migrations/*.sql`, auto-applied at boot, tracked in `schema_migrations`.
+- Manual migrate: `cd server && npm run migrate`.

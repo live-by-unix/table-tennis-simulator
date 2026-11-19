@@ -21,10 +21,12 @@ export const config = {
   port: num("PORT", 3000),
   appUrl: str("APP_URL", "http://localhost:3000"),
   clientUrl: str("CLIENT_URL", "http://localhost:5173"),
-  databaseUrl: str(
-    "DATABASE_URL",
-    "postgres://postgres:postgres@localhost:5432/tabletennis",
-  ),
+  get databaseUrl(): string {
+    return str(
+      "DATABASE_URL",
+      "postgres://postgres:postgres@localhost:5432/tabletennis",
+    );
+  },
   sessionSecret: str("SESSION_SECRET", "dev-insecure-secret-change-me"),
   sessionTtlHours: num("SESSION_TTL_HOURS", 72),
   cookieSecure: str("COOKIE_SECURE", "false") === "true",

@@ -3,28 +3,34 @@ import { config } from "./config.js";
 
 const { Pool } = pg;
 
-export const pool = new Pool({
-  connectionString: config.databaseUrl,
-  max: 10,
-  idleTimeoutMillis: 30000,
-  connectionTimeoutMillis: 5000,
-});
+let pool: pg.Pool | null = null;
 
-pool.on("error", (err) => {
-  console.error("Unexpected Postgres pool error:", err);
-});
+function getPool(): pg.Pool {
+  if (!pool) {
+    pool = new Pool({
+      connectionString: config.databaseUrl,
+      max: 10,
+      idleTimeoutMillis: 30000,
+      connectionTimeoutMillis: 5000,
+    });
+    pool.on("error", (err) => {
+      console.error("Unexpected Postgres pool error:", err);
+    });
+  }
+  return pool;
+}
 
 export async function query<T extends pg.QueryResultRow = pg.QueryResultRow>(
   text: string,
   params?: unknown[],
 ): Promise<pg.QueryResult<T>> {
-  return pool.query<T>(text, params as never[]);
+  return getPool().query<T>(text, params as never[]);
 }
 
 export async function withTransaction<T>(
   fn: (client: pg.PoolClient) => Promise<T>,
 ): Promise<T> {
-  const client = await pool.connect();
+  const client = await getPool().connect();
   try {
     await client.query("BEGIN");
     const result = await fn(client);
@@ -39,5 +45,9 @@ export async function withTransaction<T>(
 }
 
 export async function closeDb(): Promise<void> {
-  await pool.end();
+  if (pool) await pool.end();
+  pool = null;
 }
+
+export { getPool };
+export type { pg };

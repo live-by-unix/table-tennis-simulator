@@ -4,13 +4,16 @@
 
 ```bash
 npm install
-cp .env.example .env   # set DATABASE_URL to a dev postgres
+cp .env.example .env
 ./dev.sh               # API :3000 (tsx watch) + Vite :5173
 ```
 
+No database setup needed: the server auto-starts embedded PostgreSQL (data in `./data/pg`).
+Set `DATABASE_URL` in `.env` to use your own Postgres instead.
+
 Vite proxies `/api` and `/ws` to `:3000`, so the SPA works on `http://localhost:5173`.
 
-No Docker? Tests use `embedded-postgres` (auto-downloaded binaries) — `npm test` works without any database setup.
+Tests (`npm test`) use `embedded-postgres` on a scratch port — no setup required.
 
 ## Structure
 

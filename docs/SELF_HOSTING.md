@@ -1,15 +1,25 @@
 # Self-Hosting Guide
 
-## Docker (recommended)
+## Zero-dependency (recommended)
 
 ```bash
 cp .env.example .env
 openssl rand -hex 32   # → SESSION_SECRET
-./start.sh             # docker compose up -d --build
-./stop.sh              # stops app (keeps db volume)
+npm install && npm run build
+./start.sh
 ```
 
-`docker-compose.yml` provides `db` (postgres:16, named volume `pgdata`) and `app` (built image, healthcheck, restart policy).
+No Docker needed: an embedded PostgreSQL runs inside the app with data in `./data/pg`.
+For persistence across reboots use any process manager (systemd, pm2, etc.) — see below.
+
+## Docker (optional)
+
+```bash
+TTS_USE_DOCKER=1 ./start.sh    # docker compose up -d --build
+./stop.sh
+```
+
+`docker-compose.yml` provides `db` (postgres:16, named volume `pgdata`) and `app`.
 
 ## Reverse proxy + HTTPS (nginx example)
 
@@ -38,8 +48,8 @@ Same as Docker. For native installs see INSTALLATION.md. Ensure only ports 80/44
 ## Backups
 
 ```bash
-./backup.sh   # → backups/tabletennis-<ts>.sql.gz (uses pg_dump or docker exec)
-./restore.sh backups/tabletennis-<ts>.sql.gz   # asks for confirmation, replaces DB
+./backup.sh   # → backups/tabletennis-<ts>.json.gz (built-in, no deps; pg_dump used if available)
+./restore.sh backups/tabletennis-<ts>.json.gz --yes
 ```
 
 Schedule `backup.sh` via cron for production.
@@ -52,6 +62,23 @@ git pull
 ./start.sh        # migrations apply automatically at boot
 ```
 
+## systemd unit (optional)
+
+```ini
+[Unit]
+Description=Table Tennis Simulator
+After=network.target
+
+[Service]
+WorkingDirectory=/opt/table-tennis-simulator
+ExecStart=/usr/bin/node server/dist/index.js
+Restart=always
+EnvironmentFile=/opt/table-tennis-simulator/.env
+
+[Install]
+WantedBy=multi-user.target
+```
+
 ## Multi-instance
 
-Not supported out of the box (in-memory match/matchmaking state). `REDIS_URL` is reserved for future coordination. Run a single app instance per deployment.
+Not supported out of the box (in-memory match/matchmaking state). Run a single app instance per deployment.

@@ -9,6 +9,7 @@ import { registerWs } from "./ws.js";
 import { runMigrations } from "./migrate.js";
 import { matchManager } from "./game/manager.js";
 import { closeDb } from "./db.js";
+import { provisionDatabase, stopEmbedded } from "./provision.js";
 
 export async function createApp(): Promise<FastifyInstance> {
   const app = Fastify({
@@ -62,6 +63,7 @@ export async function createApp(): Promise<FastifyInstance> {
 }
 
 async function main(): Promise<void> {
+  await provisionDatabase();
   const app = await createApp();
   matchManager.start();
 
@@ -70,6 +72,7 @@ async function main(): Promise<void> {
     matchManager.stop();
     await app.close();
     await closeDb();
+    await stopEmbedded();
     process.exit(0);
   };
   process.on("SIGINT", () => void shutdown("SIGINT"));

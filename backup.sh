@@ -1,18 +1,18 @@
 #!/usr/bin/env bash
-# Backup the PostgreSQL database to backups/ using pg_dump.
+# Backup DB. Prefers pg_dump/docker; falls back to built-in JSON dump (no deps).
 set -euo pipefail
 cd "$(dirname "$0")"
+mkdir -p backups
 set -a; . ./.env 2>/dev/null || true; set +a
-DATABASE_URL="${DATABASE_URL:-postgres://postgres:postgres@localhost:5432/tabletennis}"
-BACKUP_DIR="$PWD/backups"
-mkdir -p "$BACKUP_DIR"
+DATABASE_URL="${DATABASE_URL:-}"
 TS=$(date +%Y%m%d-%H%M%S)
-OUT="$BACKUP_DIR/tabletennis-$TS.sql.gz"
-if command -v pg_dump >/dev/null 2>&1; then
-  pg_dump "$DATABASE_URL" | gzip > "$OUT"
+OUT="backups/tabletennis-$TS"
+
+if command -v pg_dump >/dev/null 2>&1 && [ -n "$DATABASE_URL" ]; then
+  pg_dump "$DATABASE_URL" | gzip > "$OUT.sql.gz" && echo "Backup: $OUT.sql.gz"
 elif command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
-  docker compose exec -T db pg_dump -U "${POSTGRES_USER:-postgres}" "${POSTGRES_DB:-tabletennis}" | gzip > "$OUT"
+  docker compose exec -T db pg_dump -U "${POSTGRES_USER:-postgres}" "${POSTGRES_DB:-tabletennis}" | gzip > "$OUT.sql.gz" && echo "Backup: $OUT.sql.gz"
 else
-  echo "ERROR: need pg_dump or docker access" >&2; exit 1
+  [ -f server/dist/dbbackup.js ] || npm run build --workspace=server
+  (cd server && node dist/dbbackup.js dump "../$OUT.json.gz")
 fi
-echo "Backup written: $OUT"

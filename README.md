@@ -25,25 +25,24 @@ A real-time multiplayer 3D table tennis simulator. Play ranked matches against r
 | Auth | Argon2id, HTTP-only session cookies |
 | Infra | Docker, Docker Compose |
 
-## Quick Start (Docker)
+## Quick Start
 
 ```bash
 git clone https://github.com/live-by-unix/table-tennis-simulator.git
 cd table-tennis-simulator
-cp .env.example .env
-# edit .env — set SESSION_SECRET to a long random string
+npm install
+npm run build
 ./start.sh
 ```
 
+That's it — **no Docker, no external database required**. On first start the server
+auto-provisions an embedded PostgreSQL (binaries bundled with the app) into `./data/pg`
+and runs migrations automatically.
+
 Open http://localhost:3000 — register two accounts (use two browsers/profiles) and play.
 
-## Quick Start (native dev)
-
-```bash
-npm install
-# start postgres, set DATABASE_URL in .env
-./dev.sh   # API on :3000, Vite dev server on :5173
-```
+Optional: set `DATABASE_URL` in `.env` to use your own PostgreSQL instead, or
+`TTS_USE_DOCKER=1 ./start.sh` to deploy via Docker Compose.
 
 See [docs/INSTALLATION.md](docs/INSTALLATION.md) for full instructions.
 
