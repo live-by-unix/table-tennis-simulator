@@ -209,7 +209,7 @@ async function renderPlay(app: HTMLElement): Promise<void> {
     return;
   }
   app.innerHTML = shell(`
-    <h1 class="mb">Play</h1>
+    <h1 class="mb">Play <span id="conn-status" class="muted" style="font-size:14px"></span></h1>
     <div class="grid cols-2">
       <div class="card">
         <h3 class="mb">Ranked Matchmaking</h3>
@@ -245,6 +245,16 @@ async function renderPlay(app: HTMLElement): Promise<void> {
     </div>`);
   bindNav(app);
 
+  const connEl = app.querySelector("#conn-status") as HTMLElement;
+  const updateConn = () => {
+    connEl.textContent = net.connected
+      ? (net.authed ? "· connected" : "· connected (not logged in)")
+      : "· connecting…";
+    connEl.style.color = net.connected ? "var(--accent2)" : "var(--danger)";
+  };
+  updateConn();
+  net.onMessage((msg) => { if (msg.type === "_connected" || msg.type === "_disconnected" || msg.type === "hello") updateConn(); });
+
   const statusEl = app.querySelector("#mm-status") as HTMLElement;
   const joinBtn = app.querySelector("#mm-join") as HTMLButtonElement;
   const cancelBtn = app.querySelector("#mm-cancel") as HTMLButtonElement;
@@ -262,10 +272,14 @@ async function renderPlay(app: HTMLElement): Promise<void> {
       statusEl.innerHTML = "";
       joinBtn.classList.remove("hidden");
       cancelBtn.classList.add("hidden");
-    } else if (msg.type === "error" && statusEl.innerHTML.includes("Searching")) {
-      statusEl.innerHTML = `<p style="color:var(--danger)">${escapeHtml(msg.error as string)}</p>`;
-      joinBtn.classList.remove("hidden");
-      cancelBtn.classList.add("hidden");
+    } else if (msg.type === "error") {
+      if (statusEl.innerHTML.includes("Searching")) {
+        statusEl.innerHTML = `<p style="color:var(--danger)">${escapeHtml(msg.error as string)}</p>`;
+        joinBtn.classList.remove("hidden");
+        cancelBtn.classList.add("hidden");
+      } else {
+        toast(msg.error as string, true);
+      }
     }
     if (msg.type === "room:created") {
       (app.querySelector("#room-info") as HTMLElement).innerHTML =
@@ -437,7 +451,7 @@ function bindNav(app: HTMLElement): void {
       e.preventDefault();
       await api.logout().catch(() => {});
       setUser(null);
-      net.close();
+      net.disconnect();
       navigate({ name: "landing" });
     });
   }

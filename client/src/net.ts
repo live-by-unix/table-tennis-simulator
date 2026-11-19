@@ -5,17 +5,23 @@ export class NetClient {
   ws: WebSocket | null = null;
   private handlers = new Set<NetHandler>();
   private reconnectTimer: number | null = null;
+  private pending: string[] = [];
+  private wantConnect = false;
   authed = false;
   user: { username: string; rating: number } | null = null;
   connected = false;
 
   connect(): void {
+    this.wantConnect = true;
     if (this.ws && (this.ws.readyState === WebSocket.OPEN || this.ws.readyState === WebSocket.CONNECTING)) return;
     const proto = location.protocol === "https:" ? "wss" : "ws";
     const ws = new WebSocket(`${proto}://${location.host}/ws`);
     this.ws = ws;
     ws.onopen = () => {
       this.connected = true;
+      // flush queued messages
+      const q = this.pending.splice(0);
+      for (const m of q) ws.send(m);
       this.emit({ type: "_connected" });
     };
     ws.onmessage = (ev) => {
@@ -34,8 +40,7 @@ export class NetClient {
       this.connected = false;
       this.authed = false;
       this.emit({ type: "_disconnected" });
-      // auto-reconnect for lobby use
-      if (this.reconnectTimer === null) {
+      if (this.wantConnect && this.reconnectTimer === null) {
         this.reconnectTimer = window.setTimeout(() => {
           this.reconnectTimer = null;
           this.connect();
@@ -45,9 +50,25 @@ export class NetClient {
     ws.onerror = () => ws.close();
   }
 
+  disconnect(): void {
+    this.wantConnect = false;
+    if (this.reconnectTimer !== null) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
+    this.ws?.close();
+    this.ws = null;
+    this.connected = false;
+    this.authed = false;
+  }
+
   send(msg: Record<string, unknown>): void {
+    const data = JSON.stringify(msg);
     if (this.ws && this.ws.readyState === WebSocket.OPEN) {
-      this.ws.send(JSON.stringify(msg));
+      this.ws.send(data);
+    } else if (this.wantConnect) {
+      // queue until open (cap to avoid unbounded growth)
+      if (this.pending.length < 200) this.pending.push(data);
     }
   }
 
@@ -58,15 +79,6 @@ export class NetClient {
 
   private emit(msg: Record<string, unknown>): void {
     for (const h of this.handlers) h(msg);
-  }
-
-  close(): void {
-    if (this.reconnectTimer !== null) {
-      clearTimeout(this.reconnectTimer);
-      this.reconnectTimer = null;
-    }
-    this.ws?.close();
-    this.ws = null;
   }
 }
 

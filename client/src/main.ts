@@ -5,7 +5,7 @@ const app = document.getElementById("app")!;
 
 async function boot(): Promise<void> {
   const user = await refreshUser();
-  if (user) net.connect();
+  net.connect(); // anonymous connections allowed (spectating, auth later via cookie)
   await render(app);
   window.addEventListener("hashchange", () => void render(app));
 }
